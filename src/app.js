@@ -107,11 +107,18 @@ ws.on('game-state', (data) => {
     return;
   }
   
+  console.log('Game state received, players:', data.players);
   store.dispatch({ type: 'SET_PLAYERS', payload: data.players || [] });
   store.dispatch({ type: 'SET_GAME_STARTED', payload: data.gameStarted || false });
   
   if (data.countdownActive && data.countdownTime !== null) {
     store.dispatch({ type: 'SET_COUNTDOWN', payload: data.countdownTime });
+  }
+  
+  // ✅ CRITICAL: Re-render if on waiting page
+  const currentState = store.getState();
+  if (currentState.currentPage === 'waiting') {
+    renderApp();
   }
 });
 
@@ -124,6 +131,7 @@ ws.on('player-id', (data) => {
     return;
   }
   
+  console.log('Player ID received:', data.playerId);
   store.dispatch({ type: 'SET_PLAYER_ID', payload: data.playerId });
 });
 
@@ -136,7 +144,15 @@ ws.on('player-joined', (data) => {
     return;
   }
   
+  console.log('Player joined, updating players:', data.players);
   store.dispatch({ type: 'SET_PLAYERS', payload: data.players || [] });
+  
+  // ✅ CRITICAL: Re-render immediately when player joins
+  const currentState = store.getState();
+  if (currentState.currentPage === 'waiting') {
+    console.log('Re-rendering waiting room after player join');
+    renderApp();
+  }
 });
 
 ws.on('player-left', (data) => {
@@ -148,14 +164,22 @@ ws.on('player-left', (data) => {
     return;
   }
   
+  console.log('Player left, updating players:', data.players);
   store.dispatch({ type: 'SET_PLAYERS', payload: data.players || [] });
+  
+  // ✅ Re-render if on waiting page
+  const currentState = store.getState();
+  if (currentState.currentPage === 'waiting') {
+    renderApp();
+  }
 });
 
 ws.on('chat-message', (data) => {
   const state = store.getState();
   
-  // Chat messages are global, but only update if we're in a game for this tab
-  if (state.gameStarted) {
+  // Chat messages are global, but only update if we're in a game or waiting for this tab
+  if (state.currentPage === 'waiting' || state.gameStarted) {
+    console.log('Chat message received:', data.message);
     store.dispatch({
       type: 'ADD_CHAT_MESSAGE',
       payload: {
@@ -169,6 +193,11 @@ ws.on('chat-message', (data) => {
     if (cleanupGame && cleanupGame.updateChat) {
       cleanupGame.updateChat();
     }
+    
+    // ✅ Re-render waiting room to show new chat message
+    if (state.currentPage === 'waiting') {
+      renderApp();
+    }
   }
 });
 
@@ -181,6 +210,7 @@ ws.on('countdown-start', (data) => {
     return;
   }
   
+  console.log('Countdown started');
   store.dispatch({ type: 'SET_COUNTDOWN', payload: data.time });
   
   // Update countdown
@@ -208,6 +238,7 @@ ws.on('game-start', (data) => {
     return;
   }
   
+  console.log('Game starting');
   store.dispatch({ type: 'SET_GAME_STATE', payload: data.gameState });
   store.dispatch({ type: 'SET_GAME_STARTED', payload: true });
   
@@ -278,16 +309,21 @@ ws.on('session-terminated', (data) => {
 function handleJoin(nickname, selectedCharacter) {
   const state = store.getState();
   
+  console.log('handleJoin called with:', nickname);
+  console.log('WebSocket connected?', ws.connected);
+  
   store.dispatch({ type: 'SET_NICKNAME', payload: nickname });
   store.dispatch({ type: 'SET_SELECTED_CHARACTER', payload: selectedCharacter });
   
   // Connect WebSocket if not connected
   if (!ws.connected) {
+    console.log('WebSocket not connected, connecting now...');
     ws.connect().then(() => {
+      console.log('✅ WebSocket connected, sending join message');
       ws.send({ 
         type: 'join', 
         nickname: nickname,
-        tabId: state.tabId, // Send tab ID with join request
+        tabId: state.tabId,
         character: selectedCharacter ? {
           name: selectedCharacter.name,
           folder: selectedCharacter.folder,
@@ -295,14 +331,15 @@ function handleJoin(nickname, selectedCharacter) {
         } : null
       });
     }).catch(error => {
-      console.error('Failed to connect:', error);
+      console.error('❌ Failed to connect:', error);
       alert('Failed to connect to server. Please make sure the server is running.');
     });
   } else {
+    console.log('✅ WebSocket already connected, sending join message');
     ws.send({ 
       type: 'join', 
       nickname: nickname,
-      tabId: state.tabId, // Send tab ID with join request
+      tabId: state.tabId,
       character: selectedCharacter ? {
         name: selectedCharacter.name,
         folder: selectedCharacter.folder,
@@ -315,7 +352,6 @@ function handleJoin(nickname, selectedCharacter) {
   store.dispatch({ type: 'SET_PAGE', payload: 'waiting' });
   renderApp();
 }
-
 
 // Handle chat message
 function handleChatMessage(message) {
@@ -402,10 +438,16 @@ store.subscribe(() => {
 
 // Initialize app
 function init() {
+  console.log('App initializing, connecting to WebSocket...');
+  
   // Connect to WebSocket
-  ws.connect().catch(error => {
-    console.error('WebSocket connection failed:', error);
-  });
+  ws.connect()
+    .then(() => {
+      console.log('✅ WebSocket connected successfully');
+    })
+    .catch(error => {
+      console.error('❌ WebSocket connection failed:', error);
+    });
 
   // Start router
   router.start();
