@@ -3,8 +3,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
+
 const PORT = 3000;
 const WS_PORT = 3001;
+
 
 // HTTP server for serving static files
 const server = http.createServer((req, res) => {
@@ -16,6 +18,7 @@ const server = http.createServer((req, res) => {
   if (filePath === './' || filePath === '.') {
     filePath = './index.html';
   }
+
 
   const extname = String(path.extname(filePath)).toLowerCase();
   const mimeTypes = {
@@ -36,7 +39,9 @@ const server = http.createServer((req, res) => {
     '.wasm': 'application/wasm'
   };
 
+
   const contentType = mimeTypes[extname] || 'application/octet-stream';
+
 
   fs.readFile(filePath, (error, content) => {
     if (error) {
@@ -54,12 +59,15 @@ const server = http.createServer((req, res) => {
   });
 });
 
+
 server.listen(PORT, () => {
   console.log(`HTTP Server running on http://localhost:${PORT}`);
 });
 
+
 // WebSocket server for game
 const wss = new WebSocket.Server({ port: WS_PORT });
+
 
 const gameState = {
   players: [],
@@ -70,17 +78,21 @@ const gameState = {
   countdownActive: false
 };
 
+
 // Store references to timers for cleanup
 let gameLoopInterval = null;
 let waitingTimer = null;
 let countdownTimer = null;
 
+
 const MAX_PLAYERS = 4;
 const WAIT_TIME = 20000; // 20 seconds
 const COUNTDOWN_TIME = 10000; // 10 seconds
 
+
 wss.on('connection', (ws) => {
   console.log('Client connected');
+
 
   ws.on('message', (message) => {
     try {
@@ -90,6 +102,7 @@ wss.on('connection', (ws) => {
       console.error('Error parsing message:', error);
     }
   });
+
 
   ws.on('close', () => {
     console.log('Client disconnected');
@@ -101,6 +114,7 @@ wss.on('connection', (ws) => {
       broadcast({
         type: 'player-left',
         playerId: player.id,
+        tabId: player.tabId, // ← ADDED: Send tabId
         players: gameState.players.map(p => ({ id: p.id, nickname: p.nickname }))
       });
       
@@ -114,6 +128,7 @@ wss.on('connection', (ws) => {
     }
   });
 
+
   // Send current game state to new connection
   ws.send(JSON.stringify({
     type: 'game-state',
@@ -125,13 +140,14 @@ wss.on('connection', (ws) => {
   }));
 });
 
+
 function handleMessage(ws, data) {
   switch (data.type) {
     case 'join':
-      handleJoin(ws, data.nickname, data.character);
+      handleJoin(ws, data.nickname, data.character, data.tabId); // ← ADDED: Pass tabId
       break;
     case 'chat':
-      handleChat(ws, data.message);
+      handleChat(ws, data.message, data.tabId); // ← ADDED: Pass tabId
       break;
     case 'player-move':
       handlePlayerMove(ws, data);
@@ -147,22 +163,27 @@ function handleMessage(ws, data) {
   }
 }
 
-function handleJoin(ws, nickname, character) {
+
+function handleJoin(ws, nickname, character, tabId) { // ← ADDED: tabId parameter
   if (gameState.players.length >= MAX_PLAYERS) {
     ws.send(JSON.stringify({
       type: 'error',
-      message: 'Game is full'
+      message: 'Game is full',
+      tabId: tabId // ← ADDED: Send tabId back
     }));
     return;
   }
 
+
   if (gameState.gameStarted) {
     ws.send(JSON.stringify({
       type: 'error',
-      message: 'Game already started'
+      message: 'Game already started',
+      tabId: tabId // ← ADDED: Send tabId back
     }));
     return;
   }
+
 
   // Check for duplicate nickname (case-insensitive)
   const trimmedNickname = (nickname || '').trim();
@@ -173,11 +194,13 @@ function handleJoin(ws, nickname, character) {
     if (isDuplicate) {
       ws.send(JSON.stringify({
         type: 'error',
-        message: 'Nickname already taken. Please choose a different one.'
+        message: 'Nickname already taken. Please choose a different one.',
+        tabId: tabId // ← ADDED: Send tabId back
       }));
       return;
     }
   }
+
 
   const playerId = `player-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   const player = {
@@ -185,32 +208,42 @@ function handleJoin(ws, nickname, character) {
     nickname: trimmedNickname || `Player ${gameState.players.length + 1}`,
     ws: ws,
     ready: false,
-    character: character || null
+    character: character || null,
+    tabId: tabId // ← ADDED: Store tabId with player
   };
 
+
   gameState.players.push(player);
+
 
   // Send player ID to the joining client
   ws.send(JSON.stringify({
     type: 'player-id',
-    playerId: player.id
+    playerId: player.id,
+    tabId: tabId // ← ADDED: Send tabId back
   }));
+
 
   broadcast({
     type: 'player-joined',
+    tabId: tabId, // ← ADDED: Send tabId
     player: { id: player.id, nickname: player.nickname, character: player.character },
     players: gameState.players.map(p => ({ id: p.id, nickname: p.nickname, character: p.character }))
   }, ws);
 
+
   checkGameStart();
 }
 
-function handleChat(ws, message) {
+
+function handleChat(ws, message, tabId) { // ← ADDED: tabId parameter
   const player = gameState.players.find(p => p.ws === ws);
   if (!player) return;
 
+
   broadcast({
     type: 'chat-message',
+    tabId: tabId, // ← ADDED: Send tabId
     playerId: player.id,
     nickname: player.nickname,
     message: message,
@@ -218,11 +251,13 @@ function handleChat(ws, message) {
   });
 }
 
+
 function handlePlayerMove(ws, data) {
   if (!gameState.gameStarted || !gameState.gameState) return;
   
   const player = gameState.players.find(p => p.ws === ws);
   if (!player) return;
+
 
   // Update game state
   if (gameState.gameState.players[player.id]) {
@@ -233,6 +268,7 @@ function handlePlayerMove(ws, data) {
     checkPowerUpCollection(player.id, data.x, data.y);
   }
 
+
   // Broadcast to all other players
   broadcast({
     type: 'player-moved',
@@ -242,16 +278,20 @@ function handlePlayerMove(ws, data) {
   }, ws);
 }
 
+
 function checkPowerUpCollection(playerId, x, y) {
   if (!gameState.gameState.powerUps) return;
+
 
   const powerUpIndex = gameState.gameState.powerUps.findIndex(pu => 
     Math.floor(pu.x) === Math.floor(x) && Math.floor(pu.y) === Math.floor(y)
   );
 
+
   if (powerUpIndex !== -1) {
     const powerUp = gameState.gameState.powerUps[powerUpIndex];
     const player = gameState.gameState.players[playerId];
+
 
     if (player) {
       switch (powerUp.type) {
@@ -266,8 +306,10 @@ function checkPowerUpCollection(playerId, x, y) {
           break;
       }
 
+
       // Remove power-up
       gameState.gameState.powerUps.splice(powerUpIndex, 1);
+
 
       // Broadcast power-up collection
       broadcast({
@@ -280,11 +322,13 @@ function checkPowerUpCollection(playerId, x, y) {
   }
 }
 
+
 function handlePlaceBomb(ws, data) {
   if (!gameState.gameStarted || !gameState.gameState) return;
   
   const player = gameState.players.find(p => p.ws === ws);
   if (!player) return;
+
 
   // Add bomb to game state
   const bombId = `bomb-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -298,10 +342,12 @@ function handlePlaceBomb(ws, data) {
     exploded: false // Flag to prevent multiple explosions
   };
 
+
   if (!gameState.gameState.bombs) {
     gameState.gameState.bombs = [];
   }
   gameState.gameState.bombs.push(bomb);
+
 
   // Broadcast bomb placement
   broadcast({
@@ -310,11 +356,14 @@ function handlePlaceBomb(ws, data) {
   });
 }
 
+
 function handleGameReady(ws) {
   const player = gameState.players.find(p => p.ws === ws);
   if (!player) return;
 
+
   player.ready = true;
+
 
   // Check if all players are ready
   if (gameState.players.length >= 2 && gameState.players.every(p => p.ready)) {
@@ -322,8 +371,10 @@ function handleGameReady(ws) {
   }
 }
 
+
 function checkGameStart() {
   const playerCount = gameState.players.length;
+
 
   if (playerCount >= 2 && !gameState.waitingStartTime && !gameState.countdownActive) {
     // Start 20 second wait timer
@@ -342,26 +393,32 @@ function checkGameStart() {
     }, WAIT_TIME);
   }
 
+
   if (playerCount === MAX_PLAYERS && !gameState.gameStarted && !gameState.countdownActive) {
     startCountdown();
   }
 }
 
+
 function startCountdown() {
   if (gameState.countdownActive) return;
 
+
   gameState.countdownActive = true;
   gameState.countdownStartTime = Date.now();
+
 
   // Clear any existing countdown timer
   if (countdownTimer) {
     clearTimeout(countdownTimer);
   }
 
+
   broadcast({
     type: 'countdown-start',
     time: COUNTDOWN_TIME
   });
+
 
   countdownTimer = setTimeout(() => {
     if (gameState.players.length >= 2) {
@@ -374,13 +431,16 @@ function startCountdown() {
   }, COUNTDOWN_TIME);
 }
 
+
 function startGame() {
   if (gameState.gameStarted) return;
+
 
   gameState.gameStarted = true;
   gameState.countdownActive = false;
   gameState.waitingStartTime = null;
   gameState.countdownStartTime = null;
+
 
   // Initialize game state
   const GRID_SIZE = 15;
@@ -392,6 +452,7 @@ function startGame() {
     explosions: []
   };
 
+
   // Initialize players in corners
   const corners = [
     { x: 1, y: 1 },
@@ -399,6 +460,7 @@ function startGame() {
     { x: 1, y: GRID_SIZE - 2 },
     { x: GRID_SIZE - 2, y: GRID_SIZE - 2 }
   ];
+
 
   gameState.players.forEach((player, index) => {
     const corner = corners[index];
@@ -416,14 +478,21 @@ function startGame() {
     };
   });
 
-  broadcast({
-    type: 'game-start',
-    gameState: gameState.gameState
+
+  // ← MODIFIED: Send tabId to each player with their game-start message
+  gameState.players.forEach(player => {
+    player.ws.send(JSON.stringify({
+      type: 'game-start',
+      tabId: player.tabId, // ← ADDED: Send tabId to each player
+      gameState: gameState.gameState
+    }));
   });
+
 
   // Start game loop
   startGameLoop();
 }
+
 
 function generateMap(size) {
   const map = [];
@@ -436,6 +505,7 @@ function generateMap(size) {
     }
   }
 
+
   // Place walls in grid pattern
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -445,6 +515,7 @@ function generateMap(size) {
     }
   }
 
+
   // Place destroyable blocks randomly (but not in corners or starting positions)
   const corners = [
     { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 },
@@ -452,6 +523,7 @@ function generateMap(size) {
     { x: 0, y: size - 1 }, { x: 1, y: size - 1 }, { x: 0, y: size - 2 },
     { x: size - 1, y: size - 1 }, { x: size - 2, y: size - 1 }, { x: size - 1, y: size - 2 }
   ];
+
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -464,8 +536,10 @@ function generateMap(size) {
     }
   }
 
+
   return map;
 }
+
 
 function startGameLoop() {
   // Clear any existing game loop
@@ -480,11 +554,14 @@ function startGameLoop() {
       return;
     }
 
+
     const now = Date.now();
     const BOMB_EXPLODE_TIME = 3000; // 3 seconds
 
+
     // Track which players have been damaged in this cycle to prevent multiple hits
     const damagedPlayersThisCycle = new Set();
+
 
     // Check for bomb explosions
     // Process bombs in reverse order to avoid index issues when removing
@@ -504,6 +581,7 @@ function startGameLoop() {
         gameState.gameState.bombs.splice(index, 1);
       });
     }
+
 
     // Ensure character data is preserved in gameState before broadcasting
     // Character data should already be in gameState.gameState.players[playerId].character
@@ -529,6 +607,7 @@ function startGameLoop() {
   }, 100); // Update every 100ms
 }
 
+
 function explodeBomb(bomb, damagedPlayersThisCycle) {
   const explosions = [];
   const range = bomb.explosionRange;
@@ -539,12 +618,15 @@ function explodeBomb(bomb, damagedPlayersThisCycle) {
     { dx: -1, dy: 0 }   // left
   ];
 
+
   // Center explosion
   explosions.push({ x: bomb.x, y: bomb.y });
+
 
   // Check for chain explosions - bombs hit by this explosion
   const now = Date.now();
   const CHAIN_EXPLOSION_DELAY = 300; // 300ms delay for chain explosions
+
 
   // Explosions in each direction
   directions.forEach(dir => {
@@ -552,12 +634,15 @@ function explodeBomb(bomb, damagedPlayersThisCycle) {
       const x = bomb.x + dir.dx * i;
       const y = bomb.y + dir.dy * i;
 
+
       if (x < 0 || x >= 15 || y < 0 || y >= 15) break;
+
 
       const cell = gameState.gameState.map[y][x];
       if (cell === 1) break; // Wall stops explosion
       
       explosions.push({ x, y });
+
 
       // Check if there's a bomb at this explosion location
       if (gameState.gameState.bombs) {
@@ -586,6 +671,7 @@ function explodeBomb(bomb, damagedPlayersThisCycle) {
         }
       }
 
+
       if (cell === 2) {
         // Destroy block
         gameState.gameState.map[y][x] = 0;
@@ -609,6 +695,7 @@ function explodeBomb(bomb, damagedPlayersThisCycle) {
     }
   });
 
+
   // Check for player damage
   // Use the shared damagedPlayersThisCycle Set to prevent multiple hits in same cycle
   Object.keys(gameState.gameState.players).forEach(playerId => {
@@ -631,6 +718,7 @@ function explodeBomb(bomb, damagedPlayersThisCycle) {
     }
   });
 
+
   // Broadcast explosion
   broadcast({
     type: 'bomb-exploded',
@@ -638,6 +726,7 @@ function explodeBomb(bomb, damagedPlayersThisCycle) {
     gameState: gameState.gameState
   });
 }
+
 
 function terminateGameSession() {
   console.log('Terminating game session - no players remaining');
@@ -674,6 +763,7 @@ function terminateGameSession() {
   });
 }
 
+
 function broadcast(message, excludeWs = null) {
   const data = JSON.stringify(message);
   wss.clients.forEach((client) => {
@@ -683,5 +773,5 @@ function broadcast(message, excludeWs = null) {
   });
 }
 
-console.log(`WebSocket Server running on ws://localhost:${WS_PORT}`);
 
+console.log(`WebSocket Server running on ws://localhost:${WS_PORT}`);

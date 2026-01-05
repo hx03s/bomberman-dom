@@ -5,11 +5,16 @@ import { createNicknamePage } from './pages/nickname-page.js';
 import { createWaitingRoom } from './pages/waiting-room.js';
 import { createGamePage } from './pages/game-page.js';
 
+// Generate unique tab ID to prevent cross-tab interference
+const tabId = 'tab-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+sessionStorage.setItem('bomberman-tab-id', tabId);
+
 // Initialize store
 const store = new Store({
   currentPage: 'nickname',
   nickname: '',
   playerId: null,
+  tabId: tabId, // Add tab isolation
   players: [],
   gameState: null,
   chatMessages: [],
@@ -73,6 +78,7 @@ store.setReducer((state, action) => {
         currentPage: 'nickname',
         nickname: '',
         playerId: null,
+        tabId: state.tabId, // Preserve tab ID on reset
         players: [],
         gameState: null,
         chatMessages: [],
@@ -93,6 +99,14 @@ ws.on('connected', () => {
 });
 
 ws.on('game-state', (data) => {
+  const state = store.getState();
+  
+  // Only process if this message is for this tab
+  if (data.tabId && data.tabId !== state.tabId) {
+    console.log('Ignoring game-state meant for different tab');
+    return;
+  }
+  
   store.dispatch({ type: 'SET_PLAYERS', payload: data.players || [] });
   store.dispatch({ type: 'SET_GAME_STARTED', payload: data.gameStarted || false });
   
@@ -102,34 +116,71 @@ ws.on('game-state', (data) => {
 });
 
 ws.on('player-id', (data) => {
+  const state = store.getState();
+  
+  // Only process if this message is for this tab
+  if (data.tabId && data.tabId !== state.tabId) {
+    console.log('Ignoring player-id meant for different tab');
+    return;
+  }
+  
   store.dispatch({ type: 'SET_PLAYER_ID', payload: data.playerId });
 });
 
 ws.on('player-joined', (data) => {
+  const state = store.getState();
+  
+  // Only process if this message is for this tab
+  if (data.tabId && data.tabId !== state.tabId) {
+    console.log('Ignoring player-joined meant for different tab');
+    return;
+  }
+  
   store.dispatch({ type: 'SET_PLAYERS', payload: data.players || [] });
 });
 
 ws.on('player-left', (data) => {
+  const state = store.getState();
+  
+  // Only process if this message is for this tab
+  if (data.tabId && data.tabId !== state.tabId) {
+    console.log('Ignoring player-left meant for different tab');
+    return;
+  }
+  
   store.dispatch({ type: 'SET_PLAYERS', payload: data.players || [] });
 });
 
 ws.on('chat-message', (data) => {
-  store.dispatch({
-    type: 'ADD_CHAT_MESSAGE',
-    payload: {
-      nickname: data.nickname,
-      message: data.message,
-      timestamp: data.timestamp
-    }
-  });
+  const state = store.getState();
   
-  // Update chat in game if active
-  if (cleanupGame && cleanupGame.updateChat) {
-    cleanupGame.updateChat();
+  // Chat messages are global, but only update if we're in a game for this tab
+  if (state.gameStarted) {
+    store.dispatch({
+      type: 'ADD_CHAT_MESSAGE',
+      payload: {
+        nickname: data.nickname,
+        message: data.message,
+        timestamp: data.timestamp
+      }
+    });
+    
+    // Update chat in game if active
+    if (cleanupGame && cleanupGame.updateChat) {
+      cleanupGame.updateChat();
+    }
   }
 });
 
 ws.on('countdown-start', (data) => {
+  const state = store.getState();
+  
+  // Only process if this message is for this tab
+  if (data.tabId && data.tabId !== state.tabId) {
+    console.log('Ignoring countdown-start meant for different tab');
+    return;
+  }
+  
   store.dispatch({ type: 'SET_COUNTDOWN', payload: data.time });
   
   // Update countdown
@@ -149,17 +200,25 @@ ws.on('countdown-start', (data) => {
 });
 
 ws.on('game-start', (data) => {
+  const state = store.getState();
+  
+  // Only process if this message is for this tab
+  if (data.tabId && data.tabId !== state.tabId) {
+    console.log('Ignoring game-start meant for different tab');
+    return;
+  }
+  
   store.dispatch({ type: 'SET_GAME_STATE', payload: data.gameState });
   store.dispatch({ type: 'SET_GAME_STARTED', payload: true });
   
   // Ensure we have player ID
-  const state = store.getState();
-  if (!state.playerId && data.gameState && data.gameState.players) {
+  const currentState = store.getState();
+  if (!currentState.playerId && data.gameState && data.gameState.players) {
     // Find our player by nickname
     const players = Object.keys(data.gameState.players);
     const ourPlayer = players.find(id => {
       const player = data.gameState.players[id];
-      return player && player.nickname === state.nickname;
+      return player && player.nickname === currentState.nickname;
     });
     if (ourPlayer) {
       store.dispatch({ type: 'SET_PLAYER_ID', payload: ourPlayer });
@@ -171,19 +230,35 @@ ws.on('game-start', (data) => {
 });
 
 ws.on('error', (data) => {
+  const state = store.getState();
+  
+  // Only process if this error is for this tab
+  if (data.tabId && data.tabId !== state.tabId) {
+    console.log('Ignoring error meant for different tab');
+    return;
+  }
+  
   // Handle server errors (e.g., duplicate nickname, game full, etc.)
   const errorMessage = data.message || 'An error occurred';
   alert(errorMessage);
   
   // If we're on the waiting page due to a failed join, go back to nickname page
-  const state = store.getState();
-  if (state.currentPage === 'waiting' && !state.playerId) {
+  const currentState = store.getState();
+  if (currentState.currentPage === 'waiting' && !currentState.playerId) {
     store.dispatch({ type: 'SET_PAGE', payload: 'nickname' });
     renderApp();
   }
 });
 
 ws.on('session-terminated', (data) => {
+  const state = store.getState();
+  
+  // Only process if this message is for this tab
+  if (data.tabId && data.tabId !== state.tabId) {
+    console.log('Ignoring session-terminated meant for different tab');
+    return;
+  }
+  
   // Handle game session termination (e.g., no players remaining)
   const message = data.message || 'Game session terminated - no players remaining';
   console.log('Session terminated:', message);
@@ -201,6 +276,8 @@ ws.on('session-terminated', (data) => {
 
 // Handle nickname submission
 function handleJoin(nickname, selectedCharacter) {
+  const state = store.getState();
+  
   store.dispatch({ type: 'SET_NICKNAME', payload: nickname });
   store.dispatch({ type: 'SET_SELECTED_CHARACTER', payload: selectedCharacter });
   
@@ -210,6 +287,7 @@ function handleJoin(nickname, selectedCharacter) {
       ws.send({ 
         type: 'join', 
         nickname: nickname,
+        tabId: state.tabId, // Send tab ID with join request
         character: selectedCharacter ? {
           name: selectedCharacter.name,
           folder: selectedCharacter.folder,
@@ -224,6 +302,7 @@ function handleJoin(nickname, selectedCharacter) {
     ws.send({ 
       type: 'join', 
       nickname: nickname,
+      tabId: state.tabId, // Send tab ID with join request
       character: selectedCharacter ? {
         name: selectedCharacter.name,
         folder: selectedCharacter.folder,
@@ -240,7 +319,12 @@ function handleJoin(nickname, selectedCharacter) {
 
 // Handle chat message
 function handleChatMessage(message) {
-  ws.send({ type: 'chat', message: message });
+  const state = store.getState();
+  ws.send({ 
+    type: 'chat', 
+    message: message,
+    tabId: state.tabId // Send tab ID with chat
+  });
 }
 
 // Render function
@@ -336,4 +420,3 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
-
