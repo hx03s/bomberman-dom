@@ -1,6 +1,16 @@
-# Bomberman DOM
+<div align="center">
 
-A multiplayer Bomberman game built with vanilla JavaScript, DOM manipulation, and WebSockets. This project uses a custom mini-framework for DOM abstraction, routing, and state management.
+<img src="docs/gameplay.jpg" alt="Bomberman DOM 💣" width="100%">
+
+# Bomberman DOM 💣
+
+**Two to four players, one grid, three lives each. Multiplayer Bomberman on a framework I wrote myself.**
+
+<img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=white" alt="JavaScript"> <img src="https://img.shields.io/badge/WebSockets-010101?style=for-the-badge" alt="WebSockets"> <img src="https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" alt="Node.js"> <img src="https://img.shields.io/badge/Custom%20framework-FF6B00?style=for-the-badge" alt="Custom framework"> <img src="https://img.shields.io/badge/60%20FPS-2EA043?style=for-the-badge" alt="60 FPS">
+
+</div>
+
+<p align="center"><img src="docs/lobby.jpg" width="70%" alt="Waiting room with chat"></p>
 
 ## Features
 
@@ -117,3 +127,13 @@ The game is built following performance best practices:
 - The game requires at least 2 players to start
 - Maximum 4 players can join a game
 
+
+Built at **[Reboot01](https://reboot01.com)**, Bahrain.
+
+---
+
+<div align="center">
+
+Built by **Hasan Abdulla** · [github.com/hx03s](https://github.com/hx03s) · Bahrain 🇧🇭
+
+</div>
